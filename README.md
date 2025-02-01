@@ -1,148 +1,203 @@
-# ***URL Shortener Service***
-<br>
 
 
-## 1) CONTEXT ON URL SERVICE :
+# **URL Shortener Service**
 
+## **1) Overview**
 
-## Functional Requirements
-1. Given a long URL, convert it into a short URL.
-2. Given a short URL, redirect it to the original long URL.
+The **URL Shortener Service** is a high-performance system designed to convert long URLs into short, easily shareable links and efficiently redirect users back to the original URLs.
 
-## Non-Functional Requirements
-- **Low Latency**: Ensure fast response times.
-- **High Availability**: Ensure the service is always accessible.
+---
 
-## Assumptions
-1. **Assumption 1**: 1000 URL requests per second, totaling approximately 31.5 billion requests per year.
-2. **Assumption 2**: Write requests = 31.5 billion, read requests = 315 billion (10x write requests).
-3. **Assumption 3**: Characters used for short URLs: `a-z`, `A-Z`, `0-9` (62 characters total).
-4. **Assumption 4**: If multiple users shorten the same long URL, each user gets a unique short URL.
-5. **Assumption 5**: The system must generate unique URLs for 10 years.
-6. **Assumption 6**: 315 billion URL shortening requests over 10 years.
-7. **Assumption 7**: 7-character combinations allow for 3.5 trillion unique URLs.
-8. **Assumption 8**: Storage requirements:
-   - Short URL: 7 bytes
-   - Long URL: 100 bytes
-   - User metadata: 500 bytes
-   - **Total**: ~1000 bytes per request
-   - **Total data for 315 billion requests**: ~315 TB.
+## **2) Functional Requirements**
+- Convert a **long URL** into a **short URL**.
+- Retrieve the **original URL** from a **short URL** and redirect users.
 
-## High-Level Design
-![Flow_diagram](https://github.com/Yashas-naidu/url_shortener/blob/main/flow_diagram.png)
+## **3) Non-Functional Requirements**
+- **Low Latency**: Ensure quick URL lookups and redirects.
+- **High Availability**: Maintain service uptime and reliability.
 
-- **LRU**: Least Recently Used
-- **TTL**: Time to Live (URLs expire if unused within a fixed time)
+---
 
-## API Design
-### REST API
-#### POST `/api/url`
-- **Input**: JSON payload with long URL.
-- **Output**: JSON payload with shortened URL.
+## **4) System Assumptions**
+1. **Traffic**: 1,000 URL shortening requests per second (~31.5 billion per year).
+2. **Read/Write Ratio**: Read requests are **10x** the write requests (31.5 billion writes, 315 billion reads per year).
+3. **Character Set for Short URLs**: `a-z`, `A-Z`, `0-9` (62 unique characters).
+4. **Uniqueness**: Each user gets a **unique** short URL, even if multiple users shorten the same long URL.
+5. **URL Expiry**: Short URLs remain valid for **10 years**.
+6. **Capacity**: The system should handle **315 billion URL requests over 10 years**.
+7. **ID Space**: 7-character combinations allow for **3.5 trillion unique URLs**.
+8. **Storage Requirements**:
+   - **Short URL**: 7 bytes
+   - **Long URL**: 100 bytes
+   - **User Metadata**: 500 bytes
+   - **Total per request**: ~1 KB
+   - **Total data for 315 billion requests**: ~315 TB
+
+---
+
+## **5) High-Level Architecture**
+![Flow Diagram](https://github.com/Yashas-naidu/url_shortener/blob/main/flow_diagram.png)
+
+### **Key Components**
+- **Load Balancer**: Distributes incoming traffic across multiple servers.
+- **Web Server**: Handles user requests and interacts with databases.
+- **Database (NoSQL + SQL)**:
+  - **NoSQL**: Stores large-scale URL mappings.
+  - **SQL**: Ensures transactional integrity where needed.
+- **Redis Cache (LRU, TTL)**: Caches frequently accessed URLs for quick retrieval.
+
+---
+
+## **6) API Design**
+### **REST API Endpoints**
+#### **1. Shorten a URL**
+- **Endpoint**: `POST /api/url`
+- **Request**:
+  ```json
+  {
+    "url": "<INSERT_LONG_URL>"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "shortUrl": "https://short.ly/abc123"
+  }
+  ```
 - **Status Codes**:
-  - `201`: Success
-  - `400`: Bad Request
-  - `409`: Conflict (URL already shortened)
+  - `201` - URL shortened successfully.
+  - `400` - Bad Request (invalid URL).
+  - `409` - Conflict (URL already shortened).
 
-#### GET `/api/url/{shortUrlId}`
-- **Input**: Short URL ID (e.g., `abc12345`).
-- **Output**: Redirect to long URL.
+#### **2. Retrieve Original URL**
+- **Endpoint**: `GET /api/url/{shortUrlId}`
+- **Response**:
+  - Redirects to the original long URL.
 - **Status Codes**:
-  - `301`: Permanently Moved (Short URL maps to long URL)
-  - `404`: Not Found (Short URL not found)
-  - `410`: Gone (Short URL expired or deleted)
+  - `301` - Permanent Redirect (short URL maps to long URL).
+  - `404` - Not Found (short URL does not exist).
+  - `410` - Gone (short URL expired or deleted).
 
-## Database
-### Schema
-- `shortUrlId` (Primary Key)
-- `longUrl`
-- `timestamp`
-- `metadata`
-- `numberOfClicks`
-- `userId`
+---
 
-### Requirements
-- Fast read (10x write) and write operations.
-- **NoSQL Options**:
-  1. MongoDB (Document Store)
-  2. Cassandra (Column Store)
-  3. DynamoDB (Key-Value Store)
-- **Replication and Sharding**: For high availability and fault tolerance.
-- **Master-Slave Architecture**: For failover and recovery.
+## **7) Database Design**
+### **Schema**
+| Column         | Type          | Description                     |
+|---------------|--------------|---------------------------------|
+| shortUrlId    | String (PK)   | Unique short URL identifier    |
+| longUrl       | String        | Original long URL              |
+| timestamp     | Timestamp     | Creation time                  |
+| metadata      | JSON          | User-related metadata          |
+| numberOfClicks | Integer      | Click count for analytics      |
+| userId        | String (FK)   | User ID (if applicable)        |
 
-### SQL Use Case
-- Required for transaction isolation when multiple users access the same short URL.
+### **Storage Considerations**
+- **Fast reads** (10x more frequent than writes).
+- **Replication & Sharding** for scalability.
+- **Master-Slave Architecture** for redundancy.
 
-### Methods to Ensure Uniqueness
-1. **Hashing**: Prone to collisions.
-2. **Auto-increment**: Predictable unique IDs.
-3. **Custom Algorithm**: Best approach. Generate 7-character combinations, store as keys, and use Booleans to track usage.
+### **Database Choices**
+- **NoSQL** (for fast retrieval):
+  - MongoDB (Document Store)
+  - Cassandra (Column Store)
+  - DynamoDB (Key-Value Store)
+- **SQL** (for transactional integrity):
+  - PostgreSQL or MySQL for controlled operations.
 
-## Security
-- Validate URLs to prevent malicious content.
-- Sanitize URLs to prevent SQL injection.
-- Set rate limits to prevent DDoS attacks (Token Bucket Algorithm).
-- Use HTTPS for encrypted communication.
-- Implement monitoring and logging for security and debugging.
+---
 
-## 2) Implementation 
+## **8) Ensuring URL Uniqueness**
+1. **Hashing**: Generates unique IDs (possible collisions).
+2. **Auto-increment**: Predictable IDs (not ideal).
+3. **Custom Algorithm** (Best Approach): 
+   - Generates 7-character unique keys.
+   - Uses a boolean flag to track usage.
 
-<h2>A Java Service built with Spring Boot, and Redis.</h1>
+---
 
-<h3>common</h3>
-<b>IDConverter.java</b> <br />
-A Singleton class responsible for: <br />
-1. Generating ID <br />
-2. Using ID to create unique URL ID <br />
-3. Using unique URL ID to retrieve original ID <br />
-<br /> <br />
-<b> URLValidator.java</b> <br />
-A Singleton class responsible for validating URL's validity
+## **9) Security Measures**
+- **Input Validation**: Prevents malformed/malicious URLs.
+- **SQL Injection Protection**: Uses ORM to sanitize inputs.
+- **DDoS Mitigation**: Implements **rate limiting** (Token Bucket Algorithm).
+- **HTTPS Enforcement**: Secures data transmission.
+- **Monitoring & Logging**: Tracks system activity and security threats.
 
-<h3>controller</h3>
-<b>URLController.java</b> <br />
-A Spring Boot Controller responsible for: <br/>
-1. Serving an endpoint to shorten URL <br />
-2. Redirect shortened URL to the original URL <br />
+---
 
-<h2>repository</h3>
-<b>URLRepository</b> <br />
-A Java class responsible for abstracting Redis(database) read/write logic
+## **10) Implementation Details**
+### **Technology Stack**
+- **Backend**: Java (Spring Boot)
+- **Database**: Redis, PostgreSQL
+- **Cache**: Redis (LRU + TTL)
+- **Build Tool**: Gradle
 
-<h2>service</h3>
-<b>URLConverterService.java</b> <br />
-A Java class used to abstract URL Shortening and URL Retrieval process
-<br />
-<b>URLShortenerApplication.java</b> <br />
-The entry point for the Spring application
-<br /> <br />
-<h2>To run:</h2>
-1. Start up Redis' Server
-
+### **Project Structure**
 ```
+src/
+├── common/
+│   ├── IDConverter.java       # Generates and decodes short URLs
+│   ├── URLValidator.java      # Validates URLs
+│
+├── controller/
+│   ├── URLController.java     # Handles API requests
+│
+├── repository/
+│   ├── URLRepository.java     # Manages Redis read/write logic
+│
+├── service/
+│   ├── URLConverterService.java  # Shortening and retrieval logic
+│
+└── URLShortenerApplication.java  # Main application entry point
+```
+
+---
+
+## **11) Running the Service**
+### **Step 1: Start Redis Server**
+```sh
 redis-server
 ```
 
-2. Build the project
-
-```
+### **Step 2: Build the Project**
+```sh
 gradle build
 ```
 
-
-3. Run the project
-
-```
+### **Step 3: Run the Application**
+```sh
 gradle run
 ```
 
-<br />
-By default the Server will run on localhost:8080/shortener <br/>
-To test, send POST Request to localhost:8080/shortener with a body of type application/json with body 
-
+### **Step 4: Test API**
+#### **Shorten a URL**
+Send a `POST` request to:
 ```
+http://localhost:8080/api/url
+```
+with JSON body:
+```json
 {
-  'url' : '<INSERT URL>'
+  "url": "https://example.com"
 }
 ```
 
+#### **Retrieve Original URL**
+Access:
+```
+http://localhost:8080/api/url/abc123
+```
+It should **redirect** to `https://example.com`.
+
+---
+
+## **12) Future Enhancements**
+- **Analytics Dashboard**: Track click rates and user engagement.
+- **Custom Aliases**: Allow users to create personalized short links.
+- **Expiration Policies**: Users can set custom expiry dates for URLs.
+- **Geo-Location Based Redirection**: Redirect users based on region.
+- **Load Balancing & Auto-Scaling**: Improve system reliability.
+
+---
+
+## **13) Conclusion**
+This URL Shortener Service is **scalable, efficient, and secure**, leveraging **Redis for caching, NoSQL for storage, and Java Spring Boot** for rapid development. The system is designed to handle **billions of requests per year** while ensuring **low latency and high availability**.
